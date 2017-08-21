@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+TEMP_DIR=/tmp/iBooksDocuments
+SUCCESS=true
+ERROR_EXIT_CODE=1
+
+if [[ $# < 1 ]]; then
+  printf "iBooks Annotations Exporter\nUsage: ibooksnotes destination\n       ibooksnotes .\n" >&2
+  SUCCESS=false
+  ERROR_EXIT_CODE=2
+else
+  DESTINATION=${1%/*}
+fi
+
+if [[ ${SUCCESS} = true && ! -d $1 && -e $1 ]] ; then
+  echo "'${DESTINATION}' is an existing file rather than a directory."
+  SUCCESS=false
+  ERROR_EXIT_CODE=3
+fi
+
+if [[ ${SUCCESS} = true && ! -d $1 ]]; then
+  mkdir -p "${DESTINATION}" || SUCCESS=false
+fi
+
+if [ ${SUCCESS} = true ]; then
+  rm -Rf "${TEMP_DIR}" && mkdir -p "${TEMP_DIR}" || SUCCESS=false
+fi
+
+if [ ${SUCCESS} = true ]; then
+  cp ~/Library/Containers/com.apple.iBooksX/Data/Documents/BKLibrary/* ${TEMP_DIR}/ && cp ~/Library/Containers/com.apple.iBooksX/Data/Documents/AEAnnotation/* ${TEMP_DIR}/ || SUCCESS=false
+fi
+
+if [ ${SUCCESS} = true ]; then
+  BOOK_LIBRARY_DATABASE=$(ls ${TEMP_DIR}/BKLibrary*.sqlite)
+  BOOK_LIBRARY_QUERY="select ZTITLE, ZAUTHOR, ZBOOKDESCRIPTION, ZGENRE, ZYEAR, datetime(ZCREATIONDATE + 978307200, 'unixepoch') Created, datetime(ZLASTOPENDATE + 978307200, 'unixepoch') LastOpen, ZACCOUNTID, ZASSETID from ZBKLIBRARYASSET order by ZLASTOPENDATE desc; "
+  BOOK_LIBRARY_OUTPUT="${DESTINATION}/Books.html"
+
+  printf '\xEF\xBB\xBF' > "${BOOK_LIBRARY_OUTPUT}"
+  printf '<table>' >> "${BOOK_LIBRARY_OUTPUT}"
+  sqlite3 -header -html "${BOOK_LIBRARY_DATABASE}" "${BOOK_LIBRARY_QUERY}" >> "${BOOK_LIBRARY_OUTPUT}" || SUCCESS=false
+  printf '</table>' >> "${BOOK_LIBRARY_OUTPUT}"
+fi
+
+if [ ${SUCCESS} = true ]; then
+  ANNOTATION_DATABASE=$(ls ${TEMP_DIR}/AEAnnotation*.sqlite)
+  ANNOTATION_QUERY="select replace(replace(replace(ZANNOTATIONNOTE, '&', '&amp;'), '<', '&lt;'), x'0a', '<br />') Note, replace(replace(replace(ZANNOTATIONREPRESENTATIVETEXT, '&', '&amp;'), '<', '&lt;'), replace(replace(ZANNOTATIONSELECTEDTEXT, '&', '&amp;'), '<', '&lt;'), '<span class=\"' || case ZANNOTATIONSTYLE when 0 then 'underline' when 3 then 'yellow' when 1 then 'green' when 2 then 'blue' when 4 then 'pink' when 5 then 'purple' end || '\">' || replace(replace(ZANNOTATIONSELECTEDTEXT, '&', '&amp;'), '<', '&lt;') || '</span>') Highlighted, ZANNOTATIONSTYLE, ZANNOTATIONISUNDERLINE, ZANNOTATIONTYPE, ZANNOTATIONREPRESENTATIVETEXT, ZANNOTATIONSELECTEDTEXT, datetime(ZANNOTATIONCREATIONDATE + 978307200, 'unixepoch') Created, datetime(ZANNOTATIONMODIFICATIONDATE + 978307200, 'unixepoch') Modified, ZFUTUREPROOFING5, ZANNOTATIONASSETID, ZANNOTATIONUUID from ZAEANNOTATION where ZANNOTATIONDELETED = 0 order by ZANNOTATIONASSETID, ZANNOTATIONCREATIONDATE; "
+  ANNOTATION_OUTPUT="${DESTINATION}/Annotations.html"
+
+  printf '\xEF\xBB\xBF' > "${ANNOTATION_OUTPUT}"
+  printf '<table>' >> "${ANNOTATION_OUTPUT}"
+  sqlite3 -header -html "${ANNOTATION_DATABASE}" "${ANNOTATION_QUERY}" >> "${ANNOTATION_OUTPUT}" || SUCCESS=false
+  printf '</table>' >> "${ANNOTATION_OUTPUT}"
+fi
+
+rm -Rf ${TEMP_DIR}
+
+if [ ${SUCCESS} = true ]; then
+  echo "Exported to ${DESTINATION}/ ."
+  exit 0
+else
+  exit ${ERROR_EXIT_CODE}
+fi
